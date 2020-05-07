@@ -16,17 +16,28 @@ limitations under the License.
 
 # dplyr.snowflakedb
 
-This R package extends [`dplyr`](https://github.com/hadley/dplyr) to add backend support for [SnowflakeDB](https://snowflake.net).  More details on `dplyr` can be found in the [README](https://github.com/hadley/dplyr/blob/master/README.md) page for the project.
+This R package extends [`dplyr`](https://github.com/hadley/dplyr) to
+add backend support for [SnowflakeDB](https://snowflake.net).
+More details on `dplyr` can be found in the
+[README](https://github.com/hadley/dplyr/blob/master/README.md) page
+for the project.
+This is a fork of the stale Snowflake repository.
 
 ## R Environment Setup
 
-The `dplyr.snowflakedb` connectivity to SnowflakeDB uses the `RJDBC` package, however,  the `rJava` package needs to be installed and working with Java 8 to support the SnowflakeDB JDBC requirements.  This may require:
+The `dplyr.snowflakedb` connectivity to SnowflakeDB uses the `RJDBC`
+package, however,  the `rJava` package needs to be installed and
+working with Java 8 to support the SnowflakeDB JDBC requirements.
+This may require:
 
 * installing Java 8
 * running `R CMD javareconf` so R uses the Java 8 for its `JAVA_HOME`
 * installing `rJava` from source so it can be linked against Java 8
 
-If you are using R on Mac OS X, please see [this wiki page](https://github.com/snowflakedb/dplyr-snowflakedb/wiki/Configuring-R-rJava-RJDBC-on-Mac-OS-X) for the necessary installation steps for `rJava`.
+If you are using R on Mac OS X, please see [this wiki
+page](https://github.com/snowflakedb/dplyr-snowflakedb/wiki/Configuring-R-rJava-RJDBC-on-Mac-OS-X)
+for the necessary installation steps for `rJava`.
+
 
 Once you have `rJava` installed and verified it is using Java 8, you can install `dplyr` and dependancies.
 

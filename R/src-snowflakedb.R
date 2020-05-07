@@ -53,9 +53,6 @@ setClass(
 #'             <account>.snowflakecomputing.com)
 #' @param port Port (Defaults to 443, the default for public endpoints)
 #' @param opts List of other parameters to pass (warehouse, db, schema, tracing)
-#' @param region_id Specifies the ID for the Snowflake Region where your account 
-#' is located. (Default: us-west, example: us-east-1). 
-#' See: \url{https://docs.snowflake.net/manuals/user-guide/intro-editions.html#region-ids-in-account-urls}
 #' @param ... for the src, other arguments passed on to the underlying
 #'   database connector, \code{dbConnect}. For the tbl, included for
 #'   compatibility with the generic, but otherwise ignored.
@@ -147,146 +144,131 @@ setClass(
 #' #}
 #' }
 
-src_snowflakedb <- function(user = NULL,
+src_snowflakedb <- function(
+                            user = NULL,
                             password = NULL,
                             account = NULL,
                             port = 443,
-                            host = NULL,
-                            opts = list(),
-                            region_id = "us-west",
-                            ...) {
-  requireNamespace("RJDBC", quietly = TRUE)
-  requireNamespace("dplyr", quietly = TRUE)
-  
-  valid_regions = c("us-east-1", "eu-central-1", "ap-southeast-2")
-  
-  isWest <- substring(tolower(region_id), 1, 7) == "us-west"
-  
-  if (!isWest && !(tolower(region_id) %in% valid_regions))
-    stop("Invalid 'region_id'. 
-         See: https://docs.snowflake.net/manuals/user-guide/intro-editions.html#region-ids-in-account-urls")
-  
-  # set client metadata info
-  snowflakeClientInfo <- paste0(
-    '{',
-    '"APPLICATION": "dplyr.snowflakedb",',
-    '"dplyr.snowflakedb.version": "',
-    packageVersion("dplyr.snowflakedb"),
-    '",',
-    '"dplyr.version": "',
-    packageVersion("dplyr"),
-    '",',
-    '"R.version": "',
-    R.Version()$version.string,
-    '",',
-    '"R.platform": "',
-    R.Version()$platform,
-    '"',
-    '}'
-  )
-  
-  # initalize the JVM and set the snowflake properties
-  .jinit()
-  .jcall(
-    "java/lang/System",
-    "S",
-    "setProperty",
-    "snowflake.client.info",
-    snowflakeClientInfo
-  )
-  
-  if (length(names(opts)) > 0) {
-    opts <- paste0("&",
-                   paste(lapply(names(opts),
-                                function(x) {
-                                  paste(x, opts[x], sep = "=")
-                                }),
-                         collapse = "&"))
-  }
-  else {
-    opts <- ""
-  }
-  
-  message("host: ", host)
-  
-  if (is.null(host) || host == "") {
-    if (isWest)
-      regionUrl <- ""
-    else
-      regionUrl <- paste0(".", tolower(region_id))
-    
-    host = paste0(account, regionUrl, ".snowflakecomputing.com")
-  }
-  
-  url <- paste0("jdbc:snowflake://",
-                host,
-                ":",
-                as.character(port),
-                "/?account=",
-                account,
-                opts)
-  message("URL: ", url)
-  conn <-
-    dbConnect(
-      RJDBC::JDBC(
-        driverClass = "com.snowflake.client.jdbc.SnowflakeDriver",
-        classPath = getOption('dplyr.jdbc.classpath', NULL),
-        identifier.quote = "\""
-      ),
-      url,
-      user,
-      password,
-      ...
+                            role = NULL,
+                            tracing = NULL,
+                            warehouse = NULL,
+                            database = NULL,
+                            schema = NULL,
+                            ...){
+
+
+    if (!requireNamespace("RJDBC", quietly = TRUE))
+        stop('Package RJDBC is missing. Run: install.packages("RJDBC")')
+    if (!requireNamespace("dplyr", quietly = TRUE))
+        stop('Package dplyr is missing. Run: install.packages("dplyr")')
+    if (!requireNamespace("rJava", quietly = TRUE))
+        stop('Package rJava is missing. Run: install.packages("rJava")')
+
+                                        # set client metadata info
+    snowflakeClientInfo <- paste0(
+        '{',
+        '"APPLICATION": "dplyr.snowflakedb",',
+        '"dplyr.snowflakedb.version": "',
+        packageVersion("dplyr.snowflakedb"),
+        '",',
+        '"dplyr.version": "',
+        packageVersion("dplyr"),
+        '",',
+        '"R.version": "',
+        R.Version()$version.string,
+        '",',
+        '"R.platform": "',
+        R.Version()$platform,
+        '"',
+        '}'
     )
-  res <- dbGetQuery(
-    conn,
-    'SELECT
+
+                                        # initalize the JVM and set the snowflake properties
+    .jinit()
+    .jcall(
+        "java/lang/System",
+        "S",
+        "setProperty",
+        "snowflake.client.info",
+        snowflakeClientInfo
+    )
+
+    url <- paste0(
+        "jdbc:snowflake://",
+        account ,
+        ".snowflakecomputing.com:",
+        as.character(port),
+        "/?account=", unlist(strsplit(account, ".", fixed=TRUE))[1],
+        if (!is.null(role)) paste0("&role=", role),
+        if (!is.null(tracing)) paste0("&tracing=", tracing),
+        if (!is.null(warehouse)) paste0("&warehouse=", warehouse),
+        if (!is.null(database)) paste0("&database=", database),
+        if (!is.null(schema)) paste0("&schema=", schema)
+    )
+
+    message("URL: ", url)
+
+    conn <-
+        DBI::dbConnect(
+                 RJDBC::JDBC(
+                            driverClass = "com.snowflake.client.jdbc.SnowflakeDriver",
+                            classPath = getOption('dplyr.jdbc.classpath', NULL),
+                            identifier.quote = "\""
+                        ),
+                 url,
+                 user,
+                 password,
+                 ...
+             )
+    res <- DBI::dbGetQuery(
+                    conn,
+                    'SELECT
     CURRENT_USER() AS USER,
     CURRENT_DATABASE() AS DBNAME,
     CURRENT_VERSION() AS VERSION,
     CURRENT_SESSION() AS SESSIONID'
-  )
-  info <- list(
-    dbname = res$DBNAME,
-    url = url,
-    version = res$VERSION,
-    user = res$USER,
-    Id = res$SESSIONID
-  )
-
-  env <- environment()
-  # temporarily suppress the warning messages from getPackageName()
-  wmsg <- getOption('warn')
-  options(warn = -1)
-  SnowflakeDBConnection <-
-    methods::setRefClass(
-      "SnowflakeDBConnection",
-      fields = c("con", "jc", "identifier.quote", "info"),
-      contains = c("JDBCConnection"),
-      where = env
     )
-  options(warn = wmsg)
-  
-  con <- structure(conn, info = info, class = c("SnowflakeDBConnection", "JDBCConnection"))
-   
-  # Creates an environment that disconnects the database when it's
-  # garbage collected
-  db_disconnector <- function(con, name, quiet = FALSE) {
-    reg.finalizer(environment(), function(...) {
-      if (!quiet) {
-        message(
-          "Auto-disconnecting ",
-          name
-        )
-      }
-      dbDisconnect(con)
-    })
-    environment()
-  }
-  
-  dbplyr::src_sql("snowflakedb",
-                  con,
-                  disco = db_disconnector(con, "snowflakedb"))
+    info <- list(
+        dbname = res$DBNAME,
+        url = url,
+        version = res$VERSION,
+        user = res$USER,
+        Id = res$SESSIONID
+    )
+
+    env <- environment()
+    ## temporarily suppress the warning messages from getPackageName()
+    wmsg <- getOption('warn')
+    options(warn = -1)
+    SnowflakeDBConnection <-
+        methods::setRefClass(
+                     "SnowflakeDBConnection",
+                     fields = c("con", "jc", "identifier.quote", "info"),
+                     contains = c("JDBCConnection"),
+                     where = env
+                 )
+    options(warn = wmsg)
+
+    con <- structure(conn, info = info, class = c("SnowflakeDBConnection", "JDBCConnection"))
+
+    ## Creates an environment that disconnects the database when it's garbage collected
+    db_disconnector <- function(con, name, quiet = FALSE) {
+        reg.finalizer(environment(), function(...) {
+            if (!quiet) {
+                message(
+                    "Auto-disconnecting ",
+                    name
+                )
+            }
+            dbDisconnect(con)
+        })
+        environment()
+    }
+
+    dbplyr::src_sql(
+                "snowflakedb",
+                con,
+                disco = db_disconnector(con, "snowflakedb"))
 }
 
 #' @export
@@ -304,11 +286,11 @@ tbl.SnowflakeDBConnection <- function(con, from, ...) {
 #' @export
 db_desc.SnowflakeDBConnection <- function(x) {
   info <- x@info
-  # Commented-out so that regression tests don't have to be updated with every new release. 
-  # Instead we use a version and URL-agnostic printout. 
-  
+  # Commented-out so that regression tests don't have to be updated with every new release.
+  # Instead we use a version and URL-agnostic printout.
+
   # paste0("Snowflake Database: ", info$version, "\nURL: ", info$url, "\n")
-  
+
   "SnowflakeDB Data Source"
 }
 
@@ -409,7 +391,7 @@ db_explain.SnowflakeDBConnection <- function(con, sql, ...) {
 # Various helper methods ------------------------------------------------------------------
 
 #' Perform a COPY INTO in Snowflake to perform a load or unload operation.
-#' 
+#'
 #' @param con A SnowflakeDBConnection object.
 #' @param from The source of the data, i.e., what comes after the FROM in the COPY
 #' statement. This can be a table, a subquery, a stage, or a local file.
@@ -427,7 +409,7 @@ db_explain.SnowflakeDBConnection <- function(con, sql, ...) {
 #'                                      db = "mydb",
 #'                                      schema = "public")
 #' # Copy from a local CSV file to a target table in my_db.
-#' db_snowflake_copy(my_db$con, from = "file:///my/directory/foo.csv", to = "target_table", 
+#' db_snowflake_copy(my_db$con, from = "file:///my/directory/foo.csv", to = "target_table",
 #' format_opts = list(format = 'csv', field_delimiter = ','))
 #' }
 #' @export
@@ -442,9 +424,9 @@ db_snowflake_copy <- function(con, from, to, format_opts = list()) {
   }
   else
     opts <- ""
-  
+
   rs <- dbGetQuery(con, paste("COPY INTO", to, "FROM", from, opts))
-  
+
   if (rs["errors_seen"] != "0")
     warning(rs)
 }
@@ -469,12 +451,12 @@ db_create_stage <- function(con, stage.name, temporary = FALSE) {
 
 db_load_from_file <- function(con, table.name, file.name) {
   stopifnot(file.exists(file.name))
-  
+
   if (!db_has_table(con, table.name))
     stop("The specified table does not exist in Snowflake.")
-  
+
   file.name <- paste0("file://", file.name)
-  
+
   # Use table stage
   stage_name <-
     paste0("@%", id(table.name), "/dplyr_connector_staging_area/")
@@ -498,7 +480,7 @@ atomic_copy <- function(con, from, to) {
     dbSendQuery(con,
                 paste("CREATE OR REPLACE TABLE", id(temp_table_name), "LIKE", id(to)))
     db_load_from_file(con, temp_table_name, from)
-    
+
     if (db_has_table(con, to))
       dbSendQuery(con,
                   paste("ALTER TABLE", id(to), "SWAP WITH", id(temp_table_name)))
@@ -526,22 +508,22 @@ copy_to.src_snowflakedb <-
            overwrite = FALSE,
            mode = "safe",
            ...) {
-    
+
     if (overwrite)
       mode = "overwrite"
-    
+
     mode <- tolower(mode)
     stopifnot(is.data.frame(df),
               is.string(name),
               mode %in% c("safe", "overwrite", "append"))
-    
+
     if(class(dest)[[1]] == "src_snowflakedb")
       connection <- dest$con
     else
       connection <- dest
-    
+
     has_table <- db_has_table(connection, name)
-    
+
     if (has_table) {
       message("The table ", name, " already exists.")
       if (mode != "overwrite" && mode != "append")
@@ -550,10 +532,10 @@ copy_to.src_snowflakedb <-
           Set parameter 'mode' to either \"overwrite\"or \"append\"."
         )
     }
-    
+
     types <- db_data_type(connection, df)
     names(types) <- names(df)
-    
+
     tryCatch({
       tmpfilename = tempfile(fileext = ".tsv")
 
@@ -573,7 +555,7 @@ copy_to.src_snowflakedb <-
       if (mode == "overwrite" || !has_table) {
         if (!has_table)
           db_create_table(connection, name, types)
-        
+
         atomic_copy(connection, tmpfilename, name)
       }
       else
@@ -582,10 +564,10 @@ copy_to.src_snowflakedb <-
     error = function(e) {
       if (!has_table && db_has_table(connection, name))
         db_drop_table(connection, name)
-      
+
       stop(e)
     })
-    
+
     tbl(connection, name)
   }
 
@@ -608,17 +590,17 @@ id <- function(name) {
   dbplyr::sql_quote(name, '"')
 }
 # snowflake.identifier <- function(name) {
-#   if (is.quoted(name)) 
+#   if (is.quoted(name))
 #     name
 #   else
 #     paste0("\"", toupper(name), "\"")
 # }
-# 
+#
 # is.quoted <- function(string) {
 #   # In R-3.4, can be replaced with base::startsWith and base::endsWith
 #   #startsWith(string, "\"") && endsWith(string, "\"")
-#    
-#   substring(string, 1, 1) == "\"" && 
+#
+#   substring(string, 1, 1) == "\"" &&
 #     substring(string, nchar(string), nchar(string)) == "\""
 # }
 
